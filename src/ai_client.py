@@ -5,7 +5,7 @@ import sys
 import numpy as np
 import logging
 import os
-from stable_baselines3 import DQN # Make sure to import the algorithm used for training
+from stable_baselines3 import PPO # *** Import PPO instead of DQN ***
 
 # Adjust import if necessary
 from tic_tac_toe_logic import (
@@ -15,18 +15,25 @@ from tic_tac_toe_logic import (
 # --- Configuration ---
 SERVER_HOST = '127.0.0.1' # Change to server's IP if not running locally
 SERVER_PORT = 8888
-import os # Make sure os is imported at the top
 
-# --- Calculate paths relative to this script's location ---
-script_dir = os.path.dirname(os.path.abspath(__file__)) # Directory containing ai_client.py (i.e., src/)
-MODEL_DIR = os.path.join(script_dir, "models")   # Models directory *inside* src/
-MODEL_NAME = "tictactoe_dqn_agent.zip" # Ensure this matches your saved model file
-MODEL_PATH = os.path.join(MODEL_DIR, MODEL_NAME) # MODEL_PATH now points inside src/models/
-AI_THINK_DELAY = 0.5 # Optional delay in seconds to make AI moves less instantaneous
+# --- Path Calculation (Use the version that matches your structure) ---
+# Option 1: If 'models' is in project root
+# script_dir = os.path.dirname(os.path.abspath(__file__))
+# project_root = os.path.dirname(script_dir)
+# MODEL_DIR = os.path.join(project_root, "models")
+
+# Option 2: If 'models' is inside 'src' (use this if you modified paths earlier)
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# project_root = os.path.dirname(script_dir) # Not needed here if model_dir is relative to script
+MODEL_DIR = os.path.join(script_dir, "models")
+
+MODEL_NAME = "tictactoe_ppo_1M.zip" # *** Ensure this matches your PPO model file ***
+MODEL_PATH = os.path.join(MODEL_DIR, MODEL_NAME)
+AI_THINK_DELAY = 0.3 # Optional delay (can be shorter if PPO is faster)
 
 logging.basicConfig(level=logging.INFO)
 
-# Pygame constants (same as client.py)
+# Pygame constants (same as before)
 WIDTH, HEIGHT = 300, 350
 LINE_WIDTH = 10
 BOARD_ROWS, BOARD_COLS = BOARD_SIZE, BOARD_SIZE
@@ -47,14 +54,14 @@ player_id = None
 current_turn = None
 board = np.zeros((BOARD_SIZE, BOARD_SIZE), dtype=int)
 game_over = False
-status_message = "Connecting AI..."
-ai_model = None
+status_message = "Connecting PPO AI..." # Updated status
+ai_model = None # Will hold the loaded PPO model
 
 # --- Pygame Setup ---
 screen = None
 font = None
 
-# --- Pygame Drawing Functions (Copied from client.py) ---
+# --- Pygame Drawing Functions (Identical to previous ai_client.py) ---
 def draw_lines():
     if not screen: return
     pygame.draw.line(screen, LINE_COLOR, (0, SQUARE_SIZE), (WIDTH, SQUARE_SIZE), LINE_WIDTH)
@@ -82,34 +89,33 @@ def display_status(message):
     text_rect = text.get_rect(center=(WIDTH // 2, WIDTH + (HEIGHT - WIDTH) // 2))
     screen.blit(text, text_rect)
 
-# --- Networking Functions (Copied/adapted from client.py) ---
+# --- Networking Functions (Identical to previous ai_client.py) ---
 async def send_message(writer_local, data):
     if not writer_local: return
     try:
         message = json.dumps(data).encode('utf-8')
         writer_local.write(message + b'\n')
         await writer_local.drain()
-        logging.debug(f"AI Sent: {data}")
+        logging.debug(f"PPO AI Sent: {data}")
     except Exception as e:
-        logging.error(f"AI Error sending message: {e}")
+        logging.error(f"PPO AI Error sending message: {e}")
         global status_message, game_over
-        status_message = "AI Connection error"
+        status_message = "PPO AI Connection error"
         game_over = True
 
 async def listen_to_server(reader_local):
-    """Listens for messages from the server and updates client state."""
-    global board, current_turn, player_id, game_over, status_message
+    global board, current_turn, player_id, game_over, status_message # Make sure all globals are declared
     try:
         while True:
             data = await reader_local.readuntil(b'\n')
             if not data:
-                logging.warning("AI: Server closed connection.")
-                status_message = "AI: Server disconnected."
+                logging.warning("PPO AI: Server closed connection.")
+                status_message = "PPO AI: Server disconnected."
                 game_over = True
                 break
 
             message_str = data.decode('utf-8').strip()
-            logging.debug(f"AI Received: {message_str}")
+            logging.debug(f"PPO AI Received: {message_str}")
 
             try:
                 message = json.loads(message_str)
@@ -118,8 +124,8 @@ async def listen_to_server(reader_local):
                 # Update state based on message type (same logic as human client)
                 if msg_type == "GAME_START":
                     player_id = message.get("player_id")
-                    status_message = message.get("message", f"AI is Player {player_id}")
-                    logging.info(f"AI Game started. Assigned Player ID: {player_id}")
+                    status_message = message.get("message", f"PPO AI is Player {player_id}")
+                    logging.info(f"PPO AI Game started. Assigned Player ID: {player_id}")
                 elif msg_type == "STATE_UPDATE":
                     board = np.array(message.get("board", []))
                     current_turn = message.get("current_turn")
@@ -128,98 +134,82 @@ async def listen_to_server(reader_local):
                     board = np.array(message.get("board", board))
                     winner = message.get("winner")
                     game_over = True
-                    if winner == player_id: status_message = "AI wins!"
-                    elif winner == 0: status_message = "AI: Draw!"
-                    else: status_message = "AI loses!"
-                    logging.info(f"AI Game Over. Winner: {winner}")
+                    if winner == player_id: status_message = "PPO AI wins!"
+                    elif winner == 0: status_message = "PPO AI: Draw!"
+                    else: status_message = "PPO AI loses!"
+                    logging.info(f"PPO AI Game Over. Winner: {winner}")
                 elif msg_type == "INVALID_MOVE":
-                    status_message = f"AI received: {message.get('message', 'Invalid Move')}"
-                    # AI might receive this if server rejects its move (should be rare if model is good)
-                    logging.warning(f"AI received invalid move: {message.get('message')}")
-                    # If AI caused invalid move, maybe force random move next? For now, just log.
+                    status_message = f"PPO AI received: {message.get('message', 'Invalid Move')}"
+                    logging.warning(f"PPO AI received invalid move: {message.get('message')}")
                 elif msg_type == "WAITING":
-                    status_message = message.get("message", "AI waiting for opponent...")
+                    status_message = message.get("message", "PPO AI waiting for opponent...")
                 elif msg_type == "OPPONENT_DISCONNECTED":
-                    status_message = "AI: Opponent disconnected. AI wins!"
+                    status_message = "PPO AI: Opponent disconnected. AI wins!"
                     game_over = True
                 elif msg_type == "ERROR":
-                     status_message = f"AI Server Error: {message.get('message', 'Unknown error')}"
+                     status_message = f"PPO AI Server Error: {message.get('message', 'Unknown error')}"
                      game_over = True
 
             except json.JSONDecodeError:
-                logging.warning(f"AI: Invalid JSON received: {message_str}")
+                logging.warning(f"PPO AI: Invalid JSON received: {message_str}")
             except Exception as e:
-                logging.error(f"AI: Error processing server message: {e}", exc_info=True)
-                status_message = "AI Processing Error"
+                logging.error(f"PPO AI: Error processing server message: {e}", exc_info=True)
+                status_message = "PPO AI Processing Error"
                 game_over = True
                 break
 
     except asyncio.IncompleteReadError:
-        logging.warning("AI: Server disconnected unexpectedly.")
-        status_message = "AI: Server disconnected."
+        logging.warning("PPO AI: Server disconnected unexpectedly.")
+        status_message = "PPO AI: Server disconnected."
     except ConnectionResetError:
-         logging.warning("AI: Connection to server reset.")
-         status_message = "AI: Connection Reset."
+         logging.warning("PPO AI: Connection to server reset.")
+         status_message = "PPO AI: Connection Reset."
     except Exception as e:
-        logging.error(f"AI: Error in listen_to_server: {e}", exc_info=True)
-        status_message = "AI Network Error"
+        logging.error(f"PPO AI: Error in listen_to_server: {e}", exc_info=True)
+        status_message = "PPO AI Network Error"
     finally:
-        logging.info("AI Listener task finished.")
-        game_over = True # Ensure game loop knows listener exited
+        logging.info("PPO AI Listener task finished.")
+        game_over = True
 
-
+# --- AI Move Function (Identical logic, uses global ai_model) ---
 def get_ai_move(current_board, ai_player_id):
-    """Uses the loaded model to predict the best move."""
     if ai_model is None:
-        logging.error("AI model is not loaded!")
-        return None # Or maybe return a random valid move?
+        logging.error("PPO AI model is not loaded!")
+        return None
 
-    # --- Observation Preparation ---
-    # 1. Get board in the model's expected format (flattened numpy array)
     observation = current_board.flatten().astype(np.int8)
-
-    # 2. Canonicalize observation (CRITICAL!)
-    # The environment assumes the agent is PLAYER_X (1).
-    # If the server assigned the AI to be PLAYER_O (2), we need to swap
-    # the numbers 1 and 2 in the observation so the AI sees *itself* as 1
-    # and the *opponent* as 2, just like during training.
     canonical_obs = observation.copy()
     if ai_player_id == PLAYER_O:
-        # Swap 1s and 2s
         player_x_mask = (canonical_obs == PLAYER_X)
         player_o_mask = (canonical_obs == PLAYER_O)
-        canonical_obs[player_x_mask] = PLAYER_O # Opponent's pieces become 2
-        canonical_obs[player_o_mask] = PLAYER_X # AI's pieces become 1
+        canonical_obs[player_x_mask] = PLAYER_O
+        canonical_obs[player_o_mask] = PLAYER_X
 
-    # --- Predict Action ---
     try:
+        # *** Use the loaded PPO model ***
         action_index, _ = ai_model.predict(canonical_obs, deterministic=True)
-        # `deterministic=True` means the AI picks the best-known action, not exploring randomly.
-        action_index = int(action_index) # Ensure it's a standard Python int
+        action_index = int(action_index)
 
         # --- Validate Action (Optional but Recommended) ---
-        # Check if the predicted action is actually valid on the *current* board
         row, col = divmod(action_index, BOARD_COLS)
         if current_board[row, col] != EMPTY:
-            logging.warning(f"AI model predicted invalid move ({action_index} on non-empty cell). Falling back to random.")
-            # Fallback: Choose a random valid move
+            logging.warning(f"PPO AI model predicted invalid move ({action_index}). Falling back to random.")
             valid_actions = np.where(current_board.flatten() == EMPTY)[0]
             if len(valid_actions) > 0:
                  action_index = int(np.random.choice(valid_actions))
             else:
-                 return None # No valid moves left (should mean draw/win already happened)
-
-        logging.info(f"AI (Player {ai_player_id}) predicts move index: {action_index}")
+                 return None
+        logging.info(f"PPO AI (Player {ai_player_id}) predicts move index: {action_index}")
         return action_index
 
     except Exception as e:
-        logging.error(f"Error during AI prediction: {e}", exc_info=True)
+        logging.error(f"Error during PPO AI prediction: {e}", exc_info=True)
         return None
 
 
+# --- Game Loop (Identical logic, uses global ai_model via get_ai_move) ---
 async def game_loop(writer_local):
-    """Handles Pygame display and triggers AI moves."""
-    global status_message # Allow modification
+    global status_message
     running = True
     last_ai_move_time = asyncio.get_event_loop().time()
 
@@ -230,108 +220,95 @@ async def game_loop(writer_local):
 
         current_time = asyncio.get_event_loop().time()
 
-        # Check for Pygame quit event
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-                break # Exit inner loop
+                break
 
-        # --- AI's Turn Logic ---
         if not game_over and current_turn == player_id:
-            if current_time - last_ai_move_time >= AI_THINK_DELAY: # Add delay
-                status_message = f"AI (Player {player_id}) is thinking..."
-                display_status(status_message) # Update display immediately
-                pygame.display.update() # Show the "thinking" message
+            if current_time - last_ai_move_time >= AI_THINK_DELAY:
+                status_message = f"PPO AI (Player {player_id}) is thinking..."
+                display_status(status_message)
+                pygame.display.update()
 
-                action_index = get_ai_move(board, player_id)
+                action_index = get_ai_move(board, player_id) # Calls the modified function
 
                 if action_index is not None:
                     await send_message(writer_local, {"type": "MAKE_MOVE", "cell": action_index})
-                    # Server response will update current_turn, so AI won't immediately move again
                 else:
-                    logging.error("AI could not determine a valid move.")
-                    # What should happen here? Maybe skip turn? For now, it will just log.
-                    status_message = "AI Error: No move"
-
-                last_ai_move_time = current_time # Reset timer after attempting move
+                    logging.error("PPO AI could not determine a valid move.")
+                    status_message = "PPO AI Error: No move"
+                last_ai_move_time = current_time
         elif not game_over and current_turn is not None:
-             # Update status if it's the other player's turn
              other_player_symbol = 'X' if current_turn == PLAYER_X else 'O'
              status_message = f"Player {other_player_symbol}'s turn"
-        # If game is over, status_message is set by the listener
 
-        # Drawing (happens every loop iteration)
         screen.fill(BG_COLOR)
         draw_lines()
-        draw_figures() # Draws board based on state updated by listener
-        display_status(status_message) # Display current status
-
+        draw_figures()
+        display_status(status_message)
         pygame.display.update()
 
-        # Check if listener task indicated game over
         if game_over and running:
-            pass # Keep displaying final state
+            pass
 
-        await asyncio.sleep(0.05) # Yield control, slightly longer sleep might be ok for AI client
+        await asyncio.sleep(0.05)
 
-    # Cleanup
     if writer_local:
         writer_local.close()
         await writer_local.wait_closed()
     pygame.quit()
-    logging.info("AI Pygame quit.")
+    logging.info("PPO AI Pygame quit.")
 
 
+# --- Main Function (Loads PPO model) ---
 async def main():
-    """Main function to load model, connect, and start client tasks."""
-    global reader, writer, screen, font, status_message, ai_model
+    global reader, writer, screen, font, status_message, ai_model # Ensure ai_model is global
 
     # --- Load Model ---
     if not os.path.exists(MODEL_PATH):
         logging.error(f"Model file not found at: {MODEL_PATH}")
         print(f"Error: Trained model '{MODEL_NAME}' not found in '{MODEL_DIR}'.")
-        print("Please ensure you have run the training script (`src/train_agent.py`) first.")
+        print("Please ensure you have run the powerful training script first.")
         return
     try:
-        # Load the model using the same algorithm class it was trained with (DQN)
-        ai_model = DQN.load(MODEL_PATH)
-        logging.info(f"AI model loaded successfully from {MODEL_PATH}")
+        # *** Load the PPO model ***
+        ai_model = PPO.load(MODEL_PATH)
+        logging.info(f"PPO AI model loaded successfully from {MODEL_PATH}")
     except Exception as e:
-        logging.error(f"Error loading AI model: {e}", exc_info=True)
-        print(f"Error: Could not load the AI model from {MODEL_PATH}. Ensure it's a valid Stable Baselines 3 DQN model.")
+        logging.error(f"Error loading PPO AI model: {e}", exc_info=True)
+        print(f"Error: Could not load the AI model from {MODEL_PATH}. Ensure it's a valid Stable Baselines 3 PPO model.")
         return
 
-    # --- Connect to Server ---
+    # --- Connect and Run (Identical logic) ---
     try:
         reader, writer = await asyncio.open_connection(SERVER_HOST, SERVER_PORT)
-        logging.info(f"AI Client connected to server at {SERVER_HOST}:{SERVER_PORT}")
-        status_message = "AI Connected, waiting..."
+        logging.info(f"PPO AI Client connected to server at {SERVER_HOST}:{SERVER_PORT}")
+        status_message = "PPO AI Connected, waiting..."
 
-        # Initialize Pygame
         pygame.init()
         screen = pygame.display.set_mode((WIDTH, HEIGHT))
-        pygame.display.set_caption("Networked Tic Tac Toe - AI Client")
+        pygame.display.set_caption("Networked Tic Tac Toe - PPO AI Client") # Updated caption
         font = pygame.font.Font(None, 36)
 
-        # Start listener and game loop
         listener_task = asyncio.create_task(listen_to_server(reader))
         gameloop_task = asyncio.create_task(game_loop(writer))
 
         await asyncio.gather(listener_task, gameloop_task)
 
     except ConnectionRefusedError:
-        logging.error(f"AI Client: Connection refused. Is the server running at {SERVER_HOST}:{SERVER_PORT}?")
-        print(f"Error: Could not connect AI client to the server at {SERVER_HOST}:{SERVER_PORT}.")
+        logging.error(f"PPO AI Client: Connection refused.")
+        print(f"Error: Could not connect PPO AI client to the server.")
     except Exception as e:
-        logging.error(f"An error occurred in AI main: {e}", exc_info=True)
-        print(f"An unexpected error occurred in the AI client: {e}")
+        logging.error(f"An error occurred in PPO AI main: {e}", exc_info=True)
+        print(f"An unexpected error occurred in the PPO AI client: {e}")
     finally:
         if writer:
             writer.close()
             try: await writer.wait_closed()
             except Exception: pass
         if pygame.get_init(): pygame.quit()
-        logging.info("AI Client shutdown complete.")
+        logging.info("PPO AI Client shutdown complete.")
 
 
 if __name__ == "__main__":
