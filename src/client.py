@@ -10,7 +10,7 @@ from tic_tac_toe_logic import (
 )
 
 # --- Configuration ---
-SERVER_HOST = '127.0.0.1' # Change to server's IP if not running locally
+SERVER_HOST = '192.168.1.14' # Change to server's IP if not running locally
 SERVER_PORT = 8888
 logging.basicConfig(level=logging.INFO)
 
